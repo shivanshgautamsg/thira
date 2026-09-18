@@ -1,0 +1,9 @@
+[project]
+name = "thira-core"
+version = "0.1.0"
+description = "THIRA Core — The brain: orchestrator, perception, context, decision, planning engines"
+requires-python = ">=3.12"
+
+dependencies = [
+    "shared",
+]

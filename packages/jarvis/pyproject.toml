@@ -1,0 +1,12 @@
+[project]
+name = "jarvis"
+version = "0.1.0"
+description = "JARVIS — Human Interface Layer for THIRA"
+requires-python = ">=3.12"
+dependencies = [
+    "shared",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "websockets>=13.0",
+    "jinja2>=3.1",
+]

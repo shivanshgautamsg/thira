@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: thira-postgres
+    environment:
+      POSTGRES_DB: thira
+      POSTGRES_USER: thira
+      POSTGRES_PASSWORD: thira_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - thira_pgdata:/var/lib/postgresql/data
+      - ./infra/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U thira -d thira"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: thira-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - thira_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  thira_pgdata:
+  thira_redis:

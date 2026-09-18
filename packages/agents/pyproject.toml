@@ -1,0 +1,6 @@
+[project]
+name = "agents"
+version = "0.1.0"
+description = "THIRA Agents — Specialized execution agents"
+requires-python = ">=3.12"
+dependencies = ["shared"]

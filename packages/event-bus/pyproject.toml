@@ -1,0 +1,6 @@
+[project]
+name = "event-bus"
+version = "0.1.0"
+description = "THIRA Event Bus — Event ingestion and routing"
+requires-python = ">=3.12"
+dependencies = ["shared"]

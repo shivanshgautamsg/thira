@@ -1,0 +1,6 @@
+[project]
+name = "echo"
+version = "0.1.0"
+description = "ECHO — Experience & Learning Engine for THIRA"
+requires-python = ">=3.12"
+dependencies = ["shared"]
