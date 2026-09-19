@@ -310,14 +310,119 @@ class ThiraOrchestrator:
             success=verification.passed,
         )
 
+        response_text = self._synthesize_response(event, plan, execution, verification)
+
         return LoopResult(
             status="completed",
             trace_id=trace_id,
             plan_id=plan.id,
             execution_id=execution.id,
             experience_id=experience.id,
-            response=verification.summary,
+            response=response_text,
         )
+
+    def _synthesize_response(
+        self,
+        event: ThiraEvent,
+        plan: Plan,
+        execution: Execution,
+        verification: VerificationResult,
+    ) -> str:
+        """Synthesize an articulate, executive-grade natural language summary of execution outcomes."""
+        if not execution.step_results:
+            return "All checks passed. No further action was required."
+
+        sections: list[str] = []
+        calendar_events: list[dict] = []
+        emails_found: list[dict] = []
+        emails_drafted: list[dict] = []
+        files_written: list[str] = []
+        commands_run: list[str] = []
+
+        for res in execution.step_results:
+            output = res.output or {}
+            if isinstance(output, dict):
+                if "events" in output and isinstance(output["events"], list):
+                    calendar_events.extend(output["events"])
+                elif "summary" in output and "start_time" in output:
+                    calendar_events.append(output)
+                if "emails" in output and isinstance(output["emails"], list):
+                    emails_found.extend(output["emails"])
+                if "draft_id" in output or ("to" in output and "subject" in output and "body" in output):
+                    emails_drafted.append(output)
+                if "path" in output and ("written" in str(output) or "bytes" in output):
+                    files_written.append(output["path"])
+                if "command" in output:
+                    commands_run.append(output["command"])
+            elif isinstance(output, list):
+                for item in output:
+                    if isinstance(item, dict):
+                        if "start_time" in item and "summary" in item:
+                            calendar_events.append(item)
+                        elif "subject" in item and "sender" in item:
+                            emails_found.append(item)
+
+        if calendar_events:
+            lines = ["### 📅 Executive Schedule & Commitments"]
+            for ev in calendar_events:
+                summary = ev.get("summary", "Executive Sync")
+                start = ev.get("start_time", "")
+                end = ev.get("end_time", "")
+                attendees = ev.get("attendees", [])
+
+                time_str = ""
+                if "T" in str(start):
+                    try:
+                        time_part = str(start).split("T")[1][:5]
+                        end_part = str(end).split("T")[1][:5] if "T" in str(end) else ""
+                        time_str = f"**{time_part} – {end_part}**" if end_part else f"**{time_part}**"
+                    except Exception:
+                        time_str = f"**{start}**"
+                else:
+                    time_str = f"**{start}**" if start else ""
+
+                att_str = f" *(with {', '.join(attendees[:2])})*" if attendees else ""
+                lines.append(f"• {time_str} · **{summary}**{att_str}")
+
+            lines.append("\n*Executive focus blocks are preserved outside scheduled meetings.*")
+            sections.append("\n".join(lines))
+
+        if emails_found:
+            lines = ["### ✉️ Priority Inbound Communications"]
+            for em in emails_found[:3]:
+                sender = em.get("sender", "Unknown")
+                subject = em.get("subject", "No subject")
+                snippet = em.get("snippet") or em.get("body", "")[:120]
+                lines.append(f"• **{sender}**: *{subject}*\n  > {snippet}")
+            sections.append("\n".join(lines))
+
+        if emails_drafted:
+            lines = ["### ✍️ Autonomous Drafts Prepared"]
+            for d in emails_drafted:
+                to = d.get("to", "")
+                subject = d.get("subject", "")
+                body = d.get("body", "")
+                lines.append(f"• **Prepared for {to}**\n  **Subject**: {subject}\n  **Draft Preview**: \"{body[:160]}...\"")
+            sections.append("\n".join(lines))
+
+        if files_written:
+            lines = ["### 📁 Files & Artifacts Created"]
+            for fp in files_written:
+                lines.append(f"• Successfully generated `{fp}`")
+            sections.append("\n".join(lines))
+
+        if commands_run:
+            lines = ["### 💻 Executed System Operations"]
+            for cmd in commands_run:
+                lines.append(f"• Completed `{cmd}`")
+            sections.append("\n".join(lines))
+
+        if not sections:
+            step_summaries = [f"• {s.description}" for s in plan.steps if s.description]
+            steps_text = "\n".join(step_summaries)
+            return f"**Completed Plan: {plan.goal}**\n\n{steps_text}\n\n*Outcome: {verification.summary}*"
+
+        return "\n\n".join(sections)
 
     async def _execute_plan(self, plan: AuthorizedPlan, trace_id: str) -> Execution:
         """Execute a plan step-by-step via the agent bus."""
@@ -471,13 +576,17 @@ class ThiraOrchestrator:
                 f"Approved plan completed: {verification.summary}", level="info"
             )
 
+        response_text = self._synthesize_response(
+            event, authorized_plan.plan, execution, verification
+        )
+
         return LoopResult(
             status="completed",
             trace_id=trace_id,
             plan_id=plan_id,
             execution_id=execution.id,
             experience_id=experience.id,
-            response=verification.summary,
+            response=response_text,
         )
 
     def stop(self) -> None:

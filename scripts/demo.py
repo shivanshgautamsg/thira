@@ -108,38 +108,95 @@ class DemoLLM:
             )()
 
         elif purpose == "plan_generation":
-            return type(
-                "Resp",
-                (),
-                {
-                    "content": json.dumps(
+            prompt_text = " ".join(getattr(m, "content", "") for m in messages).lower()
+
+            if "schedule" in prompt_text or "calendar" in prompt_text or "meeting" in prompt_text:
+                plan_payload = {
+                    "goal": "Review today's executive schedule and commitments",
+                    "requires_approval": False,
+                    "steps": [
                         {
-                            "goal": "Review calendar and draft preliminary client update",
-                            "requires_approval": False,
-                            "steps": [
-                                {
-                                    "description": "Inspect today's upcoming meetings",
-                                    "agent": "calendar",
-                                    "tool": "list_events",
-                                    "arguments": {"max_results": 5},
-                                    "depends_on": [],
-                                },
-                                {
-                                    "description": "Draft email reply to Alice Smith with status update",
-                                    "agent": "gmail",
-                                    "tool": "draft_email",
-                                    "arguments": {
-                                        "to": "alice@enterprise.com",
-                                        "subject": "Re: Project Artemis Status & Meeting Confirmation",
-                                        "body": "Hi Alice, We have reviewed the Q3 RFP requirements and are on track for tomorrow. I am preparing the review session agenda.",
-                                    },
-                                    "depends_on": [],
-                                },
-                            ],
+                            "description": "Inspect today's upcoming meetings and calendar events",
+                            "agent": "calendar",
+                            "tool": "list_events",
+                            "arguments": {"max_results": 5},
+                            "depends_on": [],
                         }
-                    )
-                },
-            )()
+                    ],
+                }
+            elif "email" in prompt_text or "inbox" in prompt_text or "rfp" in prompt_text or "mail" in prompt_text:
+                plan_payload = {
+                    "goal": "Triage priority client communications and prepare draft response",
+                    "requires_approval": False,
+                    "steps": [
+                        {
+                            "description": "Fetch unread high-priority inbox items",
+                            "agent": "gmail",
+                            "tool": "list_emails",
+                            "arguments": {"query": "is:unread", "max_results": 5},
+                            "depends_on": [],
+                        },
+                        {
+                            "description": "Draft client update for Enterprise RFP proposal",
+                            "agent": "gmail",
+                            "tool": "draft_email",
+                            "arguments": {
+                                "to": "client@enterprise.com",
+                                "subject": "Re: Enterprise Client RFP Review & Confirmation",
+                                "body": "Hi Sarah, We have reviewed the RFP requirements and confirmed our delivery timeline. Looking forward to our executive sync tomorrow.",
+                            },
+                            "depends_on": [],
+                        },
+                    ],
+                }
+            elif "governance" in prompt_text or "audit" in prompt_text or "policy" in prompt_text or "security" in prompt_text:
+                plan_payload = {
+                    "goal": "Audit active workspace agent policies and permissions",
+                    "requires_approval": False,
+                    "steps": [
+                        {
+                            "description": "Verify workspace agent permissions and sandbox integrity",
+                            "agent": "filesystem",
+                            "tool": "list_directory",
+                            "arguments": {"path": "."},
+                            "depends_on": [],
+                        }
+                    ],
+                }
+            else:
+                plan_payload = {
+                    "goal": "Synthesize comprehensive executive daily operations briefing",
+                    "requires_approval": False,
+                    "steps": [
+                        {
+                            "description": "Inspect today's upcoming meetings",
+                            "agent": "calendar",
+                            "tool": "list_events",
+                            "arguments": {"max_results": 5},
+                            "depends_on": [],
+                        },
+                        {
+                            "description": "Fetch priority inbox items",
+                            "agent": "gmail",
+                            "tool": "list_emails",
+                            "arguments": {"query": "is:unread", "max_results": 5},
+                            "depends_on": [],
+                        },
+                        {
+                            "description": "Draft email reply to Alice Smith with status update",
+                            "agent": "gmail",
+                            "tool": "draft_email",
+                            "arguments": {
+                                "to": "alice@enterprise.com",
+                                "subject": "Re: Project Artemis Status & Meeting Confirmation",
+                                "body": "Hi Alice, We have reviewed the Q3 RFP requirements and are on track for tomorrow. I am preparing the review session agenda.",
+                            },
+                            "depends_on": [],
+                        },
+                    ],
+                }
+
+            return type("Resp", (), {"content": json.dumps(plan_payload)})()
 
         elif purpose == "learning_extraction":
             return type(
