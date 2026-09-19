@@ -40,7 +40,14 @@ class ThiraConfig(BaseSettings):
     log_level: str = "INFO"
     log_format: str = "json"  # "json" or "console"
 
-    # ── Gmail (Phase 2) ──────────────────────────────────────
+    # ── Google Workspace (Gmail & Calendar) ──────────────────
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_refresh_token: str = ""
+    google_credentials_file: str = ""
+    calendar_id: str = "primary"
+
+    # Legacy alias support
     gmail_client_id: str = ""
     gmail_client_secret: str = ""
     gmail_refresh_token: str = ""

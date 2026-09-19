@@ -102,6 +102,14 @@ class ThiraOrchestrator:
 
         logger.info("orchestrator.loop_stopped")
 
+    async def _emit_trace(self, stage: str, data: dict) -> None:
+        """Emit trace lifecycle events to JARVIS if available."""
+        if self.jarvis and hasattr(self.jarvis, "broadcast_trace"):
+            try:
+                await self.jarvis.broadcast_trace(stage, data)
+            except Exception:
+                pass
+
     async def process_event(self, event: ThiraEvent) -> LoopResult:
         """Single iteration of the THIRA loop.
 
@@ -119,6 +127,17 @@ class ThiraOrchestrator:
             type=event.type.value,
         )
 
+        await self._emit_trace(
+            "perception",
+            {
+                "trace_id": trace_id,
+                "source": event.source.value,
+                "type": event.type.value,
+                "actor": event.actor,
+                "content": event.content[:250],
+            },
+        )
+
         # ─── 1. UNDERSTAND — Enrich with context ─────────────────
         enriched = await self.context.enrich(event, self.world_model)
 
@@ -128,6 +147,18 @@ class ThiraOrchestrator:
             entities=len(enriched.resolved_entities),
             context_items=len(enriched.related_context),
             interpretation=enriched.interpretation[:100] if enriched.interpretation else "",
+        )
+
+        await self._emit_trace(
+            "context",
+            {
+                "trace_id": trace_id,
+                "entities": [
+                    {"name": e.entity.name, "type": e.entity.type}
+                    for e in enriched.resolved_entities
+                ],
+                "interpretation": enriched.interpretation or "",
+            },
         )
 
         # ─── 2. DECIDE — Should we act? ──────────────────────────
@@ -140,6 +171,19 @@ class ThiraOrchestrator:
             urgency=decision.scores.urgency,
             importance=decision.scores.importance,
             confidence=decision.scores.confidence,
+        )
+
+        await self._emit_trace(
+            "decision",
+            {
+                "trace_id": trace_id,
+                "action": decision.action.value,
+                "urgency": decision.scores.urgency,
+                "importance": decision.scores.importance,
+                "risk": decision.scores.risk,
+                "confidence": decision.scores.confidence,
+                "reasoning": decision.reasoning,
+            },
         )
 
         if decision.action == DecisionAction.IGNORE:
@@ -165,6 +209,24 @@ class ThiraOrchestrator:
             plan_id=str(plan.id),
             goal=plan.goal,
             steps=len(plan.steps),
+        )
+
+        await self._emit_trace(
+            "plan",
+            {
+                "trace_id": trace_id,
+                "plan_id": str(plan.id),
+                "goal": plan.goal,
+                "steps": [
+                    {
+                        "index": s.index,
+                        "agent": s.agent,
+                        "tool": s.tool,
+                        "description": s.description,
+                    }
+                    for s in plan.steps
+                ],
+            },
         )
 
         # ─── 4. AUTHORIZE — Are we allowed? ──────────────────────
@@ -208,6 +270,15 @@ class ThiraOrchestrator:
             summary=verification.summary,
         )
 
+        await self._emit_trace(
+            "verification",
+            {
+                "trace_id": trace_id,
+                "passed": verification.passed,
+                "summary": verification.summary,
+            },
+        )
+
         # ─── 7. LEARN — Record experience ────────────────────────
         experience = await self.echo.record(
             event=event,
@@ -220,6 +291,15 @@ class ThiraOrchestrator:
 
         # Update world model with execution outcomes
         await self.world_model.apply_execution(execution, verification)
+
+        await self._emit_trace(
+            "echo",
+            {
+                "trace_id": trace_id,
+                "experience_id": str(experience.id),
+                "learnings": [l.insight for l in experience.learnings],
+            },
+        )
 
         duration_ms = int((time.monotonic() - start) * 1000)
 
@@ -258,6 +338,17 @@ class ThiraOrchestrator:
             try:
                 result = await self.agent_bus.dispatch(step)
                 execution.record_step(step, result)
+                await self._emit_trace(
+                    "step_result",
+                    {
+                        "trace_id": trace_id,
+                        "step_index": step.index,
+                        "agent": step.agent,
+                        "tool": step.tool,
+                        "success": result.success,
+                        "description": step.description,
+                    },
+                )
 
                 if not result.success:
                     recovery = await self.failure.handle(step, result=result)

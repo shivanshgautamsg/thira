@@ -11,9 +11,9 @@ import uuid
 import structlog
 import uvicorn
 
-from agents.calendar import CalendarAgent
+from agents.calendar import CalendarAgent, create_calendar_client
 from agents.filesystem import FilesystemAgent
-from agents.gmail import GmailAgent
+from agents.gmail import GmailAgent, create_gmail_client
 from agents.registry import AgentBus, AgentRegistry
 from agents.terminal import TerminalAgent
 from echo.engine import EchoEngine
@@ -89,8 +89,8 @@ async def create_thira() -> ThiraOrchestrator:
     # Register agents
     await registry.register(TerminalAgent())
     await registry.register(FilesystemAgent())
-    await registry.register(GmailAgent())
-    await registry.register(CalendarAgent())
+    await registry.register(GmailAgent(client=create_gmail_client(config)))
+    await registry.register(CalendarAgent(client=create_calendar_client(config)))
 
     # Update planning engine with available tools
     tools = await registry.discover_tools()
