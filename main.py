@@ -39,13 +39,21 @@ from thira_core.world_model.model import WorldModel
 logger = structlog.get_logger()
 
 
+import asyncio
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from shared.bus.memory_bus import InMemoryEventBus
+from shared.db.models import Base
+from scripts.demo import DemoLLM
+
+
 async def create_thira() -> ThiraOrchestrator:
     """Wire up all THIRA components and return the orchestrator."""
     config = load_config()
 
     # ── Setup logging ─────────────────────────────────────────
     setup_logging(level=config.log_level, format=config.log_format)
-    logger.info("thira.starting", version="0.1.0")
+    logger.info("thira.starting", version="0.2.0")
 
     # ── Setup user (V1: single user) ─────────────────────────
     set_current_user(
@@ -56,34 +64,61 @@ async def create_thira() -> ThiraOrchestrator:
         )
     )
 
-    # ── Infrastructure ────────────────────────────────────────
-    db = DatabaseManager(config.database_url)
-    event_bus = RedisEventBus(config.redis_url)
+    # ── Infrastructure (Postgres or SQLite Fallback) ───────────
+    session_factory = None
+    try:
+        db = DatabaseManager(config.database_url)
+        async with asyncio.timeout(1.0):
+            async with db.session() as s:
+                await s.execute(text("SELECT 1"))
+        session_factory = db.session
+        logger.info("db.connected_postgres")
+    except Exception as e:
+        logger.warning("db.postgres_unreachable", fallback="sqlite:///thira.db", error=str(e))
+        engine = create_async_engine("sqlite+aiosqlite:///thira.db", echo=False)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    # ── LLM Provider ─────────────────────────────────────────
-    openai = OpenAIProvider(
-        api_key=config.openai_api_key,
-        default_model=config.openai_model,
-        default_embedding_model=config.openai_embedding_model,
-    )
-    llm = LLMRouter(primary=openai)
+    # ── Event Bus (Redis or In-Memory Fallback) ────────────────
+    try:
+        redis_bus = RedisEventBus(config.redis_url)
+        async with asyncio.timeout(1.0):
+            await redis_bus._redis.ping()
+        event_bus = redis_bus
+        logger.info("event_bus.connected_redis")
+    except Exception as e:
+        logger.warning("event_bus.redis_unreachable", fallback="InMemoryEventBus", error=str(e))
+        event_bus = InMemoryEventBus()
+
+    # ── LLM Provider (OpenAI or Realistic Demo Fallback) ──────
+    if config.openai_api_key:
+        llm_provider = OpenAIProvider(
+            api_key=config.openai_api_key,
+            default_model=config.openai_model,
+            default_embedding_model=config.openai_embedding_model,
+        )
+        logger.info("llm.openai_configured")
+    else:
+        logger.warning("llm.api_key_absent", fallback="DemoLLM")
+        llm_provider = DemoLLM()
 
     # ── Core Engines ──────────────────────────────────────────
     perception = PerceptionEngine(event_bus=event_bus)
-    context = ContextEngine(llm=openai)
-    world_model = WorldModel(db_session_factory=db.session)
-    decision = DecisionEngine(llm=openai)
-    planning = PlanningEngine(llm=openai)
+    context = ContextEngine(llm=llm_provider)
+    world_model = WorldModel(db_session_factory=session_factory)
+    decision = DecisionEngine(llm=llm_provider)
+    planning = PlanningEngine(llm=llm_provider)
     policy = PolicyEngine()
     verification = VerificationEngine()
     failure = FailureEngine()
 
     # ── ECHO ──────────────────────────────────────────────────
-    echo = EchoEngine(db_session_factory=db.session, llm=openai)
+    echo = EchoEngine(db_session_factory=session_factory, llm=llm_provider)
 
     # ── Agents ────────────────────────────────────────────────
     registry = AgentRegistry()
-    audit = AuditTrail(db_session_factory=db.session)
+    audit = AuditTrail(db_session_factory=session_factory)
     agent_bus = AgentBus(registry=registry, audit=audit)
 
     # Register agents
@@ -135,19 +170,23 @@ def main():
     config = load_config()
     setup_logging(level=config.log_level, format=config.log_format)
 
-    # Create orchestrator (this wires everything up)
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(create_thira())
+    # Pre-initialize orchestrator
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(create_thira())
+    except Exception as e:
+        logger.error("thira.pre_init_error", error=str(e))
 
-    # Start JARVIS (FastAPI server)
     logger.info(
         "thira.serving",
         host=config.jarvis_host,
         port=config.jarvis_port,
     )
 
+    from jarvis.app import app
     uvicorn.run(
-        "jarvis.app:app",
+        app,
         host=config.jarvis_host,
         port=config.jarvis_port,
         reload=False,

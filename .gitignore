@@ -41,3 +41,8 @@ docker-compose.override.yml
 
 # Object storage (V1 local)
 storage/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3

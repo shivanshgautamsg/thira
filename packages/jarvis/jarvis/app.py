@@ -28,7 +28,16 @@ def set_orchestrator(orchestrator) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan — startup and shutdown."""
+    global _orchestrator
     logger.info("jarvis.starting")
+    if _orchestrator is None:
+        try:
+            from main import create_thira
+
+            _orchestrator = await create_thira()
+            logger.info("jarvis.orchestrator_auto_initialized")
+        except Exception as e:
+            logger.warning("jarvis.auto_init_skipped", reason=str(e))
     yield
     logger.info("jarvis.stopping")
 
