@@ -5,10 +5,10 @@ Revises:
 Create Date: 2026-09-18 10:00:00.000000
 """
 
-from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+from alembic import op
 from pgvector.sqlalchemy import Vector
+from sqlalchemy.dialects import postgresql
 
 revision = "0001"
 down_revision = None
@@ -57,7 +57,9 @@ def upgrade() -> None:
     op.create_table(
         "world_entities",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column(
+            "user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True
+        ),
         sa.Column("name", sa.String(), nullable=False),
         sa.Column("type", sa.String(), nullable=False),
         sa.Column("state", postgresql.JSONB(), server_default="{}"),
@@ -72,8 +74,18 @@ def upgrade() -> None:
     op.create_table(
         "world_relationships",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("source_entity", postgresql.UUID(as_uuid=True), sa.ForeignKey("world_entities.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("target_entity", postgresql.UUID(as_uuid=True), sa.ForeignKey("world_entities.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "source_entity",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("world_entities.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "target_entity",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("world_entities.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("relationship", sa.String(), nullable=False),
         sa.Column("weight", sa.Float(), server_default="1.0"),
         sa.Column("metadata", postgresql.JSONB(), server_default="{}"),
@@ -87,7 +99,9 @@ def upgrade() -> None:
     op.create_table(
         "decisions",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("event_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("events.id"), nullable=False),
+        sa.Column(
+            "event_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("events.id"), nullable=False
+        ),
         sa.Column("action", sa.String(), nullable=False),
         sa.Column("urgency", sa.Float(), nullable=True),
         sa.Column("importance", sa.Float(), nullable=True),
@@ -104,7 +118,12 @@ def upgrade() -> None:
     op.create_table(
         "plans",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("decision_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("decisions.id"), nullable=False),
+        sa.Column(
+            "decision_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("decisions.id"),
+            nullable=False,
+        ),
         sa.Column("goal", sa.Text(), nullable=False),
         sa.Column("status", sa.String(), server_default="pending"),
         sa.Column("steps", postgresql.JSONB(), nullable=False),
@@ -118,7 +137,9 @@ def upgrade() -> None:
     op.create_table(
         "executions",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("plan_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("plans.id"), nullable=False),
+        sa.Column(
+            "plan_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("plans.id"), nullable=False
+        ),
         sa.Column("status", sa.String(), server_default="running"),
         sa.Column("steps_completed", sa.Integer(), server_default="0"),
         sa.Column("steps_total", sa.Integer(), nullable=False),
@@ -132,7 +153,12 @@ def upgrade() -> None:
     op.create_table(
         "execution_steps",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("execution_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("executions.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "execution_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("executions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("step_index", sa.Integer(), nullable=False),
         sa.Column("agent", sa.String(), nullable=False),
         sa.Column("tool", sa.String(), nullable=False),
@@ -149,7 +175,9 @@ def upgrade() -> None:
     op.create_table(
         "autonomy_policies",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column(
+            "user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False
+        ),
         sa.Column("agent", sa.String(), nullable=False),
         sa.Column("tool", sa.String(), nullable=False),
         sa.Column("autonomy_level", sa.Integer(), nullable=False),
@@ -161,7 +189,9 @@ def upgrade() -> None:
     op.create_table(
         "audit_log",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
+        sa.Column(
+            "user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True
+        ),
         sa.Column("action", sa.String(), nullable=False),
         sa.Column("agent", sa.String(), nullable=True),
         sa.Column("tool", sa.String(), nullable=True),
@@ -178,11 +208,27 @@ def upgrade() -> None:
     op.create_table(
         "experiences",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True),
-        sa.Column("event_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("events.id"), nullable=True),
-        sa.Column("decision_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("decisions.id"), nullable=True),
-        sa.Column("plan_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("plans.id"), nullable=True),
-        sa.Column("execution_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("executions.id"), nullable=True),
+        sa.Column(
+            "user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=True
+        ),
+        sa.Column(
+            "event_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("events.id"), nullable=True
+        ),
+        sa.Column(
+            "decision_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("decisions.id"),
+            nullable=True,
+        ),
+        sa.Column(
+            "plan_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("plans.id"), nullable=True
+        ),
+        sa.Column(
+            "execution_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("executions.id"),
+            nullable=True,
+        ),
         sa.Column("context_summary", sa.Text(), nullable=False),
         sa.Column("decision_summary", sa.Text(), nullable=False),
         sa.Column("action_summary", sa.Text(), nullable=False),
@@ -198,7 +244,12 @@ def upgrade() -> None:
     op.create_table(
         "verifications",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("execution_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("executions.id"), nullable=False),
+        sa.Column(
+            "execution_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("executions.id"),
+            nullable=False,
+        ),
         sa.Column("strategy", sa.String(), nullable=False),
         sa.Column("expected", postgresql.JSONB(), nullable=True),
         sa.Column("actual", postgresql.JSONB(), nullable=True),

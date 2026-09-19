@@ -105,8 +105,11 @@ class PolicyEngine:
             auto_approved_steps=auto_steps,
         )
 
-    async def check_action(self, action: Action) -> PolicyCheckResult:
-        """Check a single action against policy rules."""
+    def check_tool_authorization(
+        self, agent: str, tool: str, arguments: dict | None = None
+    ) -> PolicyCheckResult:
+        """Synchronously check authorization for an agent tool."""
+        action = Action(agent=agent, tool=tool, arguments=arguments or {})
         key = f"{action.agent}.{action.tool}"
         annotations = self._tool_annotations.get(key, _DEFAULT_ANNOTATIONS)
 
@@ -145,3 +148,7 @@ class PolicyEngine:
                 required_level=required_level,
                 granted_level=user_level,
             )
+
+    async def check_action(self, action: Action) -> PolicyCheckResult:
+        """Check a single action against policy rules."""
+        return self.check_tool_authorization(action.agent, action.tool, action.arguments)

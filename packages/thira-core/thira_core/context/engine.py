@@ -63,11 +63,23 @@ class ContextEngine:
         # 6. Suggest priority
         suggested_priority = await self._suggest_priority(event, related_context)
 
+        # 6. Build World Model Snapshot
+        snapshot_data = WorldSnapshot()
+        if world_model and hasattr(world_model, "get_snapshot"):
+            try:
+                snap = await world_model.get_snapshot()
+                snapshot_data = WorldSnapshot(
+                    entities=snap.get("entities", []),
+                    relationships=snap.get("relationships", []),
+                )
+            except Exception:
+                pass
+
         return EnrichedEvent(
             event=event,
             resolved_entities=resolved,
             related_context=related_context,
-            world_model_snapshot=WorldSnapshot(),  # TODO: populate in Phase 1
+            world_model_snapshot=snapshot_data,
             echo_matches=echo_matches,
             suggested_priority=suggested_priority,
             interpretation=interpretation,
@@ -117,15 +129,58 @@ class ContextEngine:
     async def _resolve_entities(
         self, entities: list[Entity], world_model: object
     ) -> list[ResolvedEntity]:
-        """Resolve extracted entities against the world model.
+        """Resolve extracted entities against the world model with auto-creation."""
+        import uuid
 
-        V1: Simple wrapping — no actual resolution against world model yet.
-        Phase 1 will implement full resolution with fuzzy matching.
-        """
-        return [
-            ResolvedEntity(entity=entity, resolution_confidence=entity.confidence)
-            for entity in entities
-        ]
+        resolved_list = []
+        for entity in entities:
+            world_id = None
+            conf = entity.confidence
+            related_ids = []
+
+            if world_model:
+                try:
+                    # 1. Search for existing entity by name
+                    existing = await world_model.find_entity(entity.name)
+                    if existing:
+                        world_id = uuid.UUID(existing["id"])
+                        conf = 1.0
+                        # Get related entity IDs
+                        related = await world_model.get_related_entities(world_id)
+                        related_ids = [
+                            uuid.UUID(r["entity_id"]) for r in related if "entity_id" in r
+                        ]
+                    elif entity.confidence >= 0.8 and entity.type in (
+                        "person",
+                        "project",
+                        "organization",
+                        "document",
+                        "task",
+                    ):
+                        # 2. Auto-create high-confidence entities in the World Model
+                        created_id = await world_model.add_entity(
+                            name=entity.name,
+                            type=entity.type,
+                            state={"auto_created": True, "source": "context_engine"},
+                        )
+                        world_id = created_id
+                        conf = 0.9
+                except Exception as e:
+                    logger.debug(
+                        "context.world_model_resolution_error",
+                        entity=entity.name,
+                        error=str(e),
+                    )
+
+            resolved_list.append(
+                ResolvedEntity(
+                    entity=entity,
+                    world_entity_id=world_id,
+                    resolution_confidence=conf,
+                    related_entities=related_ids,
+                )
+            )
+        return resolved_list
 
     async def _gather_context(
         self,
@@ -133,17 +188,48 @@ class ContextEngine:
         resolved: list[ResolvedEntity],
         world_model: object,
     ) -> list[ContextItem]:
-        """Gather related context from the world model.
-
-        V1: Returns empty list — Phase 1 will query world model for related items.
-        """
-        return []
+        """Gather related context and relationships from the world model."""
+        context_items = []
+        if world_model:
+            for r in resolved:
+                if r.world_entity_id:
+                    try:
+                        rels = await world_model.get_related_entities(r.world_entity_id)
+                        for rel in rels:
+                            context_items.append(
+                                ContextItem(
+                                    source="world_model",
+                                    content=f"{r.entity.name} is related to {rel['name']} ({rel.get('relationship', 'associated')})",
+                                    relevance=float(rel.get("weight", 0.8)),
+                                )
+                            )
+                    except Exception as e:
+                        logger.debug(
+                            "context.gather_related_error",
+                            entity_id=str(r.world_entity_id),
+                            error=str(e),
+                        )
+        return context_items
 
     async def _retrieve_experiences(self, event: ThiraEvent) -> list[ExperienceSummary]:
-        """Retrieve similar past experiences from ECHO.
-
-        V1: Returns empty list — Phase 1 will implement semantic search.
-        """
+        """Retrieve similar past experiences from ECHO."""
+        if self._echo and hasattr(self._echo, "retrieve_similar"):
+            try:
+                exps = await self._echo.retrieve_similar(event.content, k=3)
+                return [
+                    ExperienceSummary(
+                        experience_id=e.id,
+                        context_summary=e.context_summary,
+                        decision_summary=e.decision_summary,
+                        outcome_summary=e.outcome_summary,
+                        success=e.success if e.success is not None else True,
+                        similarity=0.85,
+                        learnings=[l.insight for l in e.learnings],
+                    )
+                    for e in exps
+                ]
+            except Exception as e:
+                logger.debug("context.echo_retrieve_error", error=str(e))
         return []
 
     async def _interpret(
@@ -186,8 +272,11 @@ class ContextEngine:
     async def _suggest_priority(
         self, event: ThiraEvent, context: list[ContextItem]
     ) -> EventPriority:
-        """Suggest priority based on event content and context.
-
-        V1: Use the event's existing priority. Phase 1 will use LLM + context.
-        """
+        """Suggest priority based on event content, deadlines, and context."""
+        content_lower = event.content.lower()
+        if any(w in content_lower for w in ("urgent", "asap", "emergency", "deadline today")):
+            return EventPriority.HIGH
+        for ctx in context:
+            if "deadline" in ctx.content.lower() and ctx.relevance > 0.7:
+                return EventPriority.HIGH
         return event.priority

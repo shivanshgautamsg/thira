@@ -225,6 +225,7 @@ The orchestrator is the **central runtime**. It drives the THIRA loop.
 ```python
 # thira_core/orchestrator.py
 
+
 class ThiraOrchestrator:
     """
     The central THIRA loop controller.
@@ -322,10 +323,12 @@ class PerceptionEngine(Protocol):
     async def stream(self) -> AsyncIterator[ThiraEvent]: ...
     async def ingest(self, raw_event: RawEvent) -> ThiraEvent: ...
 
+
 # Context Engine
 class ContextEngine(Protocol):
     async def enrich(self, event: ThiraEvent, world: WorldModel) -> EnrichedEvent: ...
     async def resolve_entities(self, event: ThiraEvent) -> list[Entity]: ...
+
 
 # Decision Engine
 class DecisionEngine(Protocol):
@@ -333,19 +336,23 @@ class DecisionEngine(Protocol):
         self, event: EnrichedEvent, world: WorldModel, echo: EchoEngine
     ) -> Decision: ...
 
+
 # Planning Engine
 class PlanningEngine(Protocol):
     async def generate(self, decision: Decision, world: WorldModel) -> Plan: ...
     async def replan(self, plan: Plan, failure: FailureReport) -> Plan: ...
+
 
 # Policy Engine
 class PolicyEngine(Protocol):
     async def authorize(self, plan: Plan) -> AuthorizedPlan: ...
     async def check_action(self, action: Action) -> PolicyVerdict: ...
 
+
 # Verification Engine
 class VerificationEngine(Protocol):
     async def verify(self, execution: Execution) -> Verification: ...
+
 
 # Failure Engine
 class FailureEngine(Protocol):
@@ -353,11 +360,13 @@ class FailureEngine(Protocol):
         self, step: PlanStep, result: StepResult | None = None, error: Exception | None = None
     ) -> RecoveryAction: ...
 
+
 # ECHO Engine
 class EchoEngine(Protocol):
     async def record(self, **kwargs) -> Experience: ...
     async def retrieve_similar(self, context: EnrichedEvent, k: int = 5) -> list[Experience]: ...
     async def extract_learnings(self, experience: Experience) -> list[Learning]: ...
+
 
 # Agent Bus
 class AgentBus(Protocol):
@@ -461,6 +470,7 @@ class EventPriority(str, Enum):
 
 class Entity(BaseModel):
     """An entity extracted from an event."""
+
     name: str
     type: str  # "person", "project", "deadline", "document", etc.
     confidence: float = Field(ge=0.0, le=1.0)
@@ -469,12 +479,13 @@ class Entity(BaseModel):
 
 class ThiraEvent(BaseModel):
     """The universal event schema — all inputs normalize to this."""
+
     id: UUID = Field(default_factory=uuid4)
     source: EventSource
     type: EventType
     timestamp: datetime
-    actor: str | None = None              # Who/what triggered this
-    content: str                           # Human-readable content
+    actor: str | None = None  # Who/what triggered this
+    content: str  # Human-readable content
     raw_data: dict = Field(default_factory=dict)  # Original payload
     entities: list[Entity] = Field(default_factory=list)
     related_events: list[UUID] = Field(default_factory=list)
@@ -493,10 +504,10 @@ class ThiraEvent(BaseModel):
                 "content": "Please send the revised proposal by 5 PM.",
                 "entities": [
                     {"name": "Proposal", "type": "document", "confidence": 0.95},
-                    {"name": "5 PM deadline", "type": "deadline", "confidence": 0.92}
+                    {"name": "5 PM deadline", "type": "deadline", "confidence": 0.92},
                 ],
                 "priority": "high",
-                "confidence": 0.94
+                "confidence": 0.94,
             }
         }
 ```
@@ -506,13 +517,14 @@ class ThiraEvent(BaseModel):
 ```python
 class EnrichedEvent(BaseModel):
     """Event after context enrichment."""
+
     event: ThiraEvent
-    resolved_entities: list[ResolvedEntity]   # Linked to World Model
-    related_context: list[ContextItem]        # Calendar, recent emails, etc.
-    world_model_snapshot: WorldSnapshot        # Relevant slice of world state
-    echo_matches: list[ExperienceSummary]      # Similar past experiences
+    resolved_entities: list[ResolvedEntity]  # Linked to World Model
+    related_context: list[ContextItem]  # Calendar, recent emails, etc.
+    world_model_snapshot: WorldSnapshot  # Relevant slice of world state
+    echo_matches: list[ExperienceSummary]  # Similar past experiences
     suggested_priority: EventPriority
-    interpretation: str                        # LLM-generated interpretation
+    interpretation: str  # LLM-generated interpretation
 ```
 
 ### 4.3 Redis Streams Event Envelope
@@ -887,12 +899,13 @@ Every MCP tool includes annotations that the Policy Engine uses:
 ```python
 class ToolAnnotation(BaseModel):
     """Metadata attached to each MCP tool for policy decisions."""
+
     autonomy_level: int = Field(ge=0, le=5)  # Minimum autonomy level required
-    reversible: bool = True                   # Can the action be undone?
-    risk: str = "low"                         # "low", "medium", "high", "critical"
-    requires_confirmation: bool = False        # Always ask user?
-    side_effects: list[str] = []              # What external state does this change?
-    rate_limit: int | None = None             # Max calls per hour
+    reversible: bool = True  # Can the action be undone?
+    risk: str = "low"  # "low", "medium", "high", "critical"
+    requires_confirmation: bool = False  # Always ask user?
+    side_effects: list[str] = []  # What external state does this change?
+    rate_limit: int | None = None  # Max calls per hour
 ```
 
 ### 6.4 BaseAgent Interface
@@ -901,6 +914,7 @@ class ToolAnnotation(BaseModel):
 # agents/base.py
 
 from abc import ABC, abstractmethod
+
 
 class BaseAgent(ABC):
     """Base class for all THIRA execution agents."""
@@ -965,13 +979,15 @@ class AgentRegistry:
         tools = []
         for agent in self._agents.values():
             for cap in agent.capabilities():
-                tools.append(ToolDescriptor(
-                    agent=agent.name,
-                    tool=cap.name,
-                    description=cap.description,
-                    input_schema=cap.input_schema,
-                    annotations=cap.annotations,
-                ))
+                tools.append(
+                    ToolDescriptor(
+                        agent=agent.name,
+                        tool=cap.name,
+                        description=cap.description,
+                        input_schema=cap.input_schema,
+                        annotations=cap.annotations,
+                    )
+                )
         return tools
 
     async def route(self, tool_name: str) -> BaseAgent:
@@ -998,11 +1014,13 @@ class AgentBus:
         agent = await self.registry.route(step.tool)
 
         # 2. Policy check
-        verdict = await self.policy.check_action(Action(
-            agent=agent.name,
-            tool=step.tool,
-            arguments=step.arguments,
-        ))
+        verdict = await self.policy.check_action(
+            Action(
+                agent=agent.name,
+                tool=step.tool,
+                arguments=step.arguments,
+            )
+        )
         if verdict.blocked:
             return StepResult(success=False, error="Policy blocked")
 
@@ -1041,11 +1059,13 @@ class PolicyEngine:
         steps_needing_approval = []
 
         for step in plan.steps:
-            verdict = await self.check_action(Action(
-                agent=step.agent,
-                tool=step.tool,
-                arguments=step.arguments,
-            ))
+            verdict = await self.check_action(
+                Action(
+                    agent=step.agent,
+                    tool=step.tool,
+                    arguments=step.arguments,
+                )
+            )
             if verdict.requires_approval:
                 steps_needing_approval.append(step)
 
@@ -1053,9 +1073,7 @@ class PolicyEngine:
             plan=plan,
             requires_approval=len(steps_needing_approval) > 0,
             approval_steps=steps_needing_approval,
-            auto_approved_steps=[
-                s for s in plan.steps if s not in steps_needing_approval
-            ],
+            auto_approved_steps=[s for s in plan.steps if s not in steps_needing_approval],
         )
 
     async def check_action(self, action: Action) -> PolicyVerdict:
@@ -1077,7 +1095,10 @@ class PolicyEngine:
         if granted_level >= required_level:
             return PolicyVerdict(allowed=True)
         else:
-            return PolicyVerdict(requires_approval=True, reason=f"L{required_level} required, L{granted_level} granted")
+            return PolicyVerdict(
+                requires_approval=True,
+                reason=f"L{required_level} required, L{granted_level} granted",
+            )
 ```
 
 ### 8.3 Audit Trail
@@ -1094,10 +1115,10 @@ class AuditRecord(BaseModel):
     tool: str
     arguments: dict
     result_summary: str
-    policy_verdict: str        # "allowed", "approved", "blocked"
-    approval_id: UUID | None   # If user approval was obtained
+    policy_verdict: str  # "allowed", "approved", "blocked"
+    approval_id: UUID | None  # If user approval was obtained
     duration_ms: int
-    trace_id: str              # Links to observability trace
+    trace_id: str  # Links to observability trace
 ```
 
 ### 8.4 Credential Management
@@ -1182,6 +1203,7 @@ When the user sends a message through JARVIS:
 ```python
 # jarvis/chat.py
 
+
 @app.websocket("/ws/chat")
 async def chat(websocket: WebSocket):
     await websocket.accept()
@@ -1215,6 +1237,7 @@ Every THIRA loop iteration produces a trace:
 ```python
 class ThiraTrace(BaseModel):
     """Complete trace of a single THIRA loop iteration."""
+
     trace_id: str
     trigger: ThiraEvent
     context_retrieval: ContextSummary
@@ -1235,14 +1258,15 @@ class ThiraTrace(BaseModel):
 ```python
 class LLMCallRecord(BaseModel):
     """Record of every LLM invocation."""
+
     call_id: str
     trace_id: str
-    engine: str               # Which THIRA engine made the call
-    model: str                # "gpt-4o", etc.
+    engine: str  # Which THIRA engine made the call
+    model: str  # "gpt-4o", etc.
     prompt_tokens: int
     completion_tokens: int
     duration_ms: int
-    purpose: str              # "entity_extraction", "decision_scoring", "plan_generation"
+    purpose: str  # "entity_extraction", "decision_scoring", "plan_generation"
     cost_usd: float
 ```
 
