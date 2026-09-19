@@ -91,14 +91,15 @@ async def create_thira() -> ThiraOrchestrator:
         logger.warning("event_bus.redis_unreachable", fallback="InMemoryEventBus", error=str(e))
         event_bus = InMemoryEventBus()
 
-    # ── LLM Provider (OpenAI or Realistic Demo Fallback) ──────
-    if config.openai_api_key:
+    # ── LLM Provider (OpenAI, Groq, DeepSeek, Ollama, or Demo) ─
+    if config.openai_api_key or config.openai_base_url:
         llm_provider = OpenAIProvider(
-            api_key=config.openai_api_key,
+            api_key=config.openai_api_key or "ollama",
+            base_url=config.openai_base_url or None,
             default_model=config.openai_model,
             default_embedding_model=config.openai_embedding_model,
         )
-        logger.info("llm.openai_configured")
+        logger.info("llm.provider_configured", model=config.openai_model, base_url=config.openai_base_url or "api.openai.com")
     else:
         logger.warning("llm.api_key_absent", fallback="DemoLLM")
         llm_provider = DemoLLM()
@@ -151,6 +152,7 @@ async def create_thira() -> ThiraOrchestrator:
         failure=failure,
         echo=echo,
         jarvis=jarvis_notifier,
+        llm=llm_provider,
     )
 
     # Inject orchestrator into JARVIS

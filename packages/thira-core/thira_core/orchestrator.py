@@ -60,6 +60,7 @@ class ThiraOrchestrator:
         failure: FailureEngine,
         echo: object,  # EchoEngine — implemented in Phase 1
         jarvis: object,  # JarvisNotifier — implemented in Phase 1
+        llm: object | None = None,
     ):
         self.perception = perception
         self.context = context
@@ -72,6 +73,7 @@ class ThiraOrchestrator:
         self.failure = failure
         self.echo = echo
         self.jarvis = jarvis
+        self.llm = llm
 
         self._pending_approvals: dict[uuid.UUID, dict] = {}
         self._running = False
@@ -310,7 +312,7 @@ class ThiraOrchestrator:
             success=verification.passed,
         )
 
-        response_text = self._synthesize_response(event, plan, execution, verification)
+        response_text = await self._synthesize_response(event, plan, execution, verification)
 
         return LoopResult(
             status="completed",
@@ -321,7 +323,7 @@ class ThiraOrchestrator:
             response=response_text,
         )
 
-    def _synthesize_response(
+    async def _synthesize_response(
         self,
         event: ThiraEvent,
         plan: Plan,
@@ -329,6 +331,37 @@ class ThiraOrchestrator:
         verification: VerificationResult,
     ) -> str:
         """Synthesize an articulate, executive-grade natural language summary of execution outcomes."""
+        # If a live LLM is configured (not DemoLLM), dynamically generate a tailored executive response
+        if self.llm and getattr(self.llm, "__class__", type("")).__name__ != "DemoLLM":
+            try:
+                from shared.llm.provider import LLMMessage
+                llm_prompt = f"""You are THIRA, an executive autonomous operations copilot for an enterprise client.
+Synthesize the execution outcome into a crisp, polished, high-agency executive briefing.
+
+USER COMMAND: {event.content}
+PLAN GOAL: {plan.goal}
+EXECUTION RESULTS:
+{json.dumps([{'step': s.step_index, 'success': s.success, 'output': s.output} for s in execution.step_results], default=str)}
+OUTCOME VERIFICATION: {verification.summary}
+
+Rules:
+- Respond in professional Markdown.
+- Provide actionable findings, meeting schedules, or communication status directly.
+- Do NOT output debug logs or raw JSON.
+- Be concise, decisive, and executive-ready."""
+                llm_resp = await self.llm.complete(
+                    messages=[
+                        LLMMessage(role="system", content="You are THIRA, an enterprise operations intelligence system."),
+                        LLMMessage(role="user", content=llm_prompt),
+                    ],
+                    temperature=0.3,
+                    purpose="response_synthesis",
+                )
+                if llm_resp and llm_resp.content and len(llm_resp.content.strip()) > 10:
+                    return llm_resp.content.strip()
+            except Exception as e:
+                logger.warning("orchestrator.dynamic_synthesis_fallback", error=str(e))
+
         if not execution.step_results:
             return "All checks passed. No further action was required."
 
@@ -576,7 +609,7 @@ class ThiraOrchestrator:
                 f"Approved plan completed: {verification.summary}", level="info"
             )
 
-        response_text = self._synthesize_response(
+        response_text = await self._synthesize_response(
             event, authorized_plan.plan, execution, verification
         )
 

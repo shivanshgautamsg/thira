@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 import structlog
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
+from shared.config import load_config
 from shared.enums import EventSource, EventType
 from shared.events import ThiraEvent
 
@@ -216,6 +219,86 @@ async def health():
     return {"status": "ok", "service": "thira", "timestamp": datetime.now(UTC).isoformat()}
 
 
+@app.get("/api/settings")
+async def get_settings():
+    """Retrieve active enterprise configuration."""
+    cfg = load_config()
+    return {
+        "user_name": cfg.user_name,
+        "user_role": cfg.user_role,
+        "workspace_name": cfg.workspace_name,
+        "autonomy_level": cfg.autonomy_level,
+        "openai_model": cfg.openai_model,
+        "openai_base_url": cfg.openai_base_url,
+        "has_openai_key": bool(cfg.openai_api_key),
+        "has_google_credentials": bool(cfg.google_client_id or cfg.google_refresh_token),
+        "anthropic_model": cfg.anthropic_model,
+        "has_anthropic_key": bool(cfg.anthropic_api_key),
+    }
+
+
+@app.post("/api/settings")
+async def update_settings(updates: dict):
+    """Update settings, persist to .env, and dynamically apply to runtime."""
+    env_path = Path(".env")
+    env_map = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line_clean = line.strip()
+            if line_clean and not line_clean.startswith("#") and "=" in line_clean:
+                k, v = line_clean.split("=", 1)
+                env_map[k.strip().upper()] = v.strip()
+
+    key_mapping = {
+        "user_name": "USER_NAME",
+        "user_role": "USER_ROLE",
+        "workspace_name": "WORKSPACE_NAME",
+        "autonomy_level": "AUTONOMY_LEVEL",
+        "openai_api_key": "OPENAI_API_KEY",
+        "openai_model": "OPENAI_MODEL",
+        "openai_base_url": "OPENAI_BASE_URL",
+        "google_client_id": "GOOGLE_CLIENT_ID",
+        "google_client_secret": "GOOGLE_CLIENT_SECRET",
+        "google_refresh_token": "GOOGLE_REFRESH_TOKEN",
+        "anthropic_api_key": "ANTHROPIC_API_KEY",
+        "anthropic_model": "ANTHROPIC_MODEL",
+    }
+
+    for k, v in updates.items():
+        if k in key_mapping and v is not None:
+            env_map[key_mapping[k]] = str(v)
+
+    # Persist back to .env
+    out_lines = [f"{k}={v}" for k, v in env_map.items()]
+    env_path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+
+    # Update runtime environment variables
+    for k, v in env_map.items():
+        os.environ[k] = v
+
+    # Dynamically hot-swap live LLM in running orchestrator
+    global _orchestrator
+    if _orchestrator and ("openai_api_key" in updates or "openai_base_url" in updates or "openai_model" in updates):
+        from shared.llm.openai_provider import OpenAIProvider
+
+        api_key = updates.get("openai_api_key") or env_map.get("OPENAI_API_KEY", "")
+        base_url = updates.get("openai_base_url") or env_map.get("OPENAI_BASE_URL", "")
+        model = updates.get("openai_model") or env_map.get("OPENAI_MODEL", "gpt-4o")
+
+        if api_key or base_url:
+            new_llm = OpenAIProvider(api_key=api_key or "ollama", base_url=base_url or None, default_model=model)
+            _orchestrator.llm = new_llm
+            if hasattr(_orchestrator, "planning"):
+                _orchestrator.planning._llm = new_llm
+            if hasattr(_orchestrator, "context"):
+                _orchestrator.context._llm = new_llm
+            if hasattr(_orchestrator, "decision"):
+                _orchestrator.decision._llm = new_llm
+            logger.info("thira.llm_hot_swapped", model=model, base_url=base_url or "api.openai.com")
+
+    return {"status": "ok", "message": "Configuration successfully saved and applied."}
+
+
 @app.post("/api/approve/{plan_id}")
 async def approve_plan(plan_id: str, approved: bool = True):
     """Approve or reject a pending plan."""
@@ -231,13 +314,15 @@ async def trigger_demo_scenario(scenario_name: str):
     if not _orchestrator:
         return {"error": "Orchestrator not initialized"}
 
+    cfg = load_config()
+
     if scenario_name in ("morning_briefing", "executive_briefing"):
         event = ThiraEvent(
             source=EventSource.USER_COMMAND,
             type=EventType.USER_REQUEST,
             timestamp=datetime.now(UTC),
-            actor="user",
-            content="Generate my executive morning briefing. Review upcoming calendar events and summarize priority items.",
+            actor=cfg.user_name,
+            content=f"Generate executive morning briefing for {cfg.user_name} at {cfg.workspace_name}. Review upcoming calendar events and summarize priority items.",
         )
     elif scenario_name in ("inbound_email", "inbound_rfp"):
         event = ThiraEvent(
@@ -245,10 +330,10 @@ async def trigger_demo_scenario(scenario_name: str):
             type=EventType.MESSAGE_RECEIVED,
             timestamp=datetime.now(UTC),
             actor="client@enterprise.com",
-            content="Subject: URGENT: Q3 Proposal Review and Deadline\nFrom: client@enterprise.com\n\nHi, Please confirm the RFP submission and schedule our review meeting tomorrow at 3 PM.",
+            content=f"Subject: URGENT: Deliverables Sign-off for {cfg.workspace_name}\nFrom: client@enterprise.com\n\nHi {cfg.user_name}, Please confirm the scope and schedule our review meeting tomorrow at 3 PM.",
             raw_data={
                 "from": "client@enterprise.com",
-                "subject": "URGENT: Q3 Proposal Review and Deadline",
+                "subject": f"URGENT: Deliverables Sign-off for {cfg.workspace_name}",
             },
         )
     elif scenario_name in ("schedule_check", "schedule_sync"):
@@ -257,7 +342,7 @@ async def trigger_demo_scenario(scenario_name: str):
             type=EventType.CALENDAR_EVENT_UPCOMING,
             timestamp=datetime.now(UTC),
             actor="calendar",
-            content="What is on my schedule today? List upcoming executive meetings and commitments.",
+            content=f"Review today's schedule for {cfg.user_name}. Check for upcoming meetings and potential conflicts.",
         )
     elif scenario_name in ("governance_audit", "security_audit"):
         event = ThiraEvent(
@@ -368,9 +453,6 @@ CHAT_HTML = """<!DOCTYPE html>
             font-weight: 700;
             letter-spacing: -0.02em;
             color: #ffffff;
-            display: flex;
-            align-items: center;
-            gap: 8px;
         }
 
         .brand-text p {
@@ -392,6 +474,13 @@ CHAT_HTML = """<!DOCTYPE html>
             align-items: center;
             gap: 6px;
             margin-left: 12px;
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+
+        .workspace-tag:hover {
+            border-color: var(--accent);
+            color: var(--text-primary);
         }
 
         /* Top Action Buttons */
@@ -426,7 +515,7 @@ CHAT_HTML = """<!DOCTYPE html>
         .user-section {
             display: flex;
             align-items: center;
-            gap: 16px;
+            gap: 14px;
         }
 
         .core-status {
@@ -462,11 +551,17 @@ CHAT_HTML = """<!DOCTYPE html>
             align-items: center;
             gap: 8px;
             background: var(--bg-elevated);
-            padding: 4px 10px 4px 5px;
+            padding: 4px 12px 4px 5px;
             border-radius: 20px;
             border: 1px solid var(--border-subtle);
             font-size: 12px;
             color: var(--text-primary);
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+
+        .user-pill:hover {
+            border-color: var(--accent);
         }
 
         .avatar-sm {
@@ -480,6 +575,22 @@ CHAT_HTML = """<!DOCTYPE html>
             font-size: 10px;
             font-weight: 700;
             color: white;
+        }
+
+        .btn-settings-icon {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 6px;
+            transition: all 0.15s;
+        }
+
+        .btn-settings-icon:hover {
+            color: var(--text-primary);
+            background: var(--bg-elevated);
         }
 
         /* Main 2-Pane Workspace */
@@ -1000,6 +1111,111 @@ CHAT_HTML = """<!DOCTYPE html>
             border-radius: 3px;
         }
 
+        /* Settings Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .modal-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-strong);
+            border-radius: 12px;
+            width: 560px;
+            max-width: 90vw;
+            box-shadow: var(--shadow-lg);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .modal-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-header h3 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 16px;
+            font-weight: 700;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        .modal-close:hover { color: white; }
+
+        .modal-body {
+            padding: 20px 24px;
+            overflow-y: auto;
+            max-height: 70vh;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .form-group label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .form-group input, .form-group select {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            outline: none;
+            font-family: inherit;
+        }
+
+        .form-group input:focus, .form-group select:focus {
+            border-color: var(--accent);
+        }
+
+        .form-hint {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.3;
+        }
+
+        .modal-footer {
+            padding: 14px 24px;
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            background: var(--bg-base);
+        }
+
         /* Scrollbars */
         ::-webkit-scrollbar { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -1016,9 +1232,9 @@ CHAT_HTML = """<!DOCTYPE html>
                 <h1>THIRA</h1>
                 <p>Enterprise Autonomous Operations</p>
             </div>
-            <div class="workspace-tag">
+            <div class="workspace-tag" onclick="openSettings()" title="Click to customize workspace">
                 <span>🏢</span>
-                <span>Acme Global · Executive Suite</span>
+                <span id="navWorkspaceName">Acme Global Technologies</span>
             </div>
         </div>
 
@@ -1042,10 +1258,11 @@ CHAT_HTML = """<!DOCTYPE html>
                 <div class="pulse-dot"></div>
                 <span id="coreStatusText">Core Active · L3 Policy</span>
             </div>
-            <div class="user-pill">
-                <div class="avatar-sm">SG</div>
-                <span>Shivansh Gautam</span>
+            <div class="user-pill" onclick="openSettings()" title="Configure Executive Profile & Integrations">
+                <div class="avatar-sm" id="navUserAvatar">SG</div>
+                <span id="navUserName">Shivansh Gautam</span>
             </div>
+            <button class="btn-settings-icon" onclick="openSettings()" title="Settings & Integrations">⚙️</button>
         </div>
     </header>
 
@@ -1060,7 +1277,7 @@ CHAT_HTML = """<!DOCTYPE html>
                 <div class="executive-hero">
                     <div class="hero-top">
                         <h2>Executive Operations Console</h2>
-                        <span class="hero-badge">L3 Autonomous Governance</span>
+                        <span class="hero-badge" id="kpiAutonomy">L3 Autonomous Governance</span>
                     </div>
                     <p class="hero-desc">
                         THIRA is actively monitoring executive communications, calendar schedules, and enterprise agents. All actions adhere to strict deterministic safety policies and deterministic verification.
@@ -1075,7 +1292,7 @@ CHAT_HTML = """<!DOCTYPE html>
                             <span class="lbl">Audit Integrity</span>
                         </div>
                         <div class="kpi-card">
-                            <span class="val">L3 Guard</span>
+                            <span class="val" id="kpiAutonomyVal">L3 Guard</span>
                             <span class="lbl">Safety Policy</span>
                         </div>
                         <div class="kpi-card">
@@ -1088,8 +1305,8 @@ CHAT_HTML = """<!DOCTYPE html>
                 <!-- Initial Copilot Message -->
                 <div class="message-row assistant">
                     <div class="message-avatar">T</div>
-                    <div class="message-content">
-                        <strong>Good morning, Shivansh.</strong><br>
+                    <div class="message-content" id="initialGreetingMsg">
+                        <strong>Good morning, Executive.</strong><br>
                         I am THIRA, your autonomous operations copilot. I am actively tracking your schedule, prioritizing client inquiries, and preparing draft responses under enterprise governance policies.<br><br>
                         You can ask: <em>"What's on my schedule today?"</em>, request a <em>"Priority inbox summary"</em>, or select an executive workflow from the top bar.
                     </div>
@@ -1147,7 +1364,7 @@ CHAT_HTML = """<!DOCTYPE html>
                     <div class="agent-card">
                         <div class="agent-top">
                             <span class="agent-name">✉️ Gmail Agent</span>
-                            <span class="agent-badge badge-active">Operational</span>
+                            <span class="agent-badge badge-active" id="badgeGmail">Operational</span>
                         </div>
                         <p class="agent-scope">
                             <strong>Permissions</strong>: Read, triage & draft.<br>
@@ -1158,7 +1375,7 @@ CHAT_HTML = """<!DOCTYPE html>
                     <div class="agent-card">
                         <div class="agent-top">
                             <span class="agent-name">📅 Calendar Agent</span>
-                            <span class="agent-badge badge-active">Operational</span>
+                            <span class="agent-badge badge-active" id="badgeCalendar">Operational</span>
                         </div>
                         <p class="agent-scope">
                             <strong>Permissions</strong>: Read events, detect conflicts & draft invites.<br>
@@ -1236,6 +1453,79 @@ CHAT_HTML = """<!DOCTYPE html>
 
     </main>
 
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>⚙️ Enterprise Configuration & Integrations</h3>
+                <button class="modal-close" onclick="closeSettings()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Workspace / Organization Name</label>
+                    <input type="text" id="cfgWorkspaceName" placeholder="e.g. Acme Global Technologies">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label>Executive User Name</label>
+                        <input type="text" id="cfgUserName" placeholder="e.g. Shivansh Gautam">
+                    </div>
+                    <div class="form-group">
+                        <label>Executive Role</label>
+                        <input type="text" id="cfgUserRole" placeholder="e.g. Chief Executive Officer">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Autonomy Policy Level</label>
+                    <select id="cfgAutonomyLevel">
+                        <option value="L1">L1 — Observe & Suggest</option>
+                        <option value="L2">L2 — Safe Read-Only Autonomous</option>
+                        <option value="L3" selected>L3 — Semi-Autonomous (Requires Approval on Sends/Deletes)</option>
+                        <option value="L4">L4 — Autonomous with Review</option>
+                        <option value="L5">L5 — Full High-Agency Autonomy</option>
+                    </select>
+                </div>
+                <hr style="border: none; border-top: 1px solid var(--border-subtle);">
+                <div class="form-group">
+                    <label>Live AI Model Provider</label>
+                    <select id="cfgLlmProvider" onchange="handleProviderChange()">
+                        <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
+                        <option value="groq">Groq (Llama 3.3 70B - Ultra Fast)</option>
+                        <option value="deepseek">DeepSeek (DeepSeek V3 / R1)</option>
+                        <option value="ollama">Ollama (Local Private Engine)</option>
+                        <option value="custom">Custom OpenAI-Compatible Endpoint</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" id="cfgApiKey" placeholder="sk-...">
+                    <span class="form-hint">Stored safely in local .env. Leave blank if using local Ollama.</span>
+                </div>
+                <div class="form-group" id="groupBaseUrl" style="display: none;">
+                    <label>API Base URL</label>
+                    <input type="text" id="cfgBaseUrl" placeholder="e.g. https://api.groq.com/openai/v1 or http://localhost:11434/v1">
+                </div>
+                <div class="form-group">
+                    <label>Model Name</label>
+                    <input type="text" id="cfgModel" placeholder="e.g. gpt-4o">
+                </div>
+                <hr style="border: none; border-top: 1px solid var(--border-subtle);">
+                <div class="form-group">
+                    <label>Google Workspace Integration</label>
+                    <span class="form-hint">Configure OAuth2 Client ID and Refresh Token to sync real live Gmail & Google Calendar data.</span>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px;">
+                        <input type="text" id="cfgGoogleClientId" placeholder="Google Client ID">
+                        <input type="password" id="cfgGoogleRefreshToken" placeholder="Google Refresh Token">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-reject" onclick="closeSettings()">Cancel</button>
+                <button class="btn-approve" onclick="saveSettings()">Save & Apply</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const messagesDiv = document.getElementById('messagesContainer');
         const input = document.getElementById('commandInput');
@@ -1246,13 +1536,136 @@ CHAT_HTML = """<!DOCTYPE html>
         const shimmerText = document.getElementById('shimmerText');
 
         let ws = null;
+        let appConfig = {};
+
+        async function initSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                appConfig = await res.json();
+                applyConfigToUI(appConfig);
+            } catch (e) {
+                console.error("Failed to load settings:", e);
+            }
+        }
+
+        function applyConfigToUI(cfg) {
+            if (cfg.workspace_name) {
+                document.getElementById('navWorkspaceName').textContent = cfg.workspace_name;
+            }
+            if (cfg.user_name) {
+                document.getElementById('navUserName').textContent = cfg.user_name;
+                const initials = cfg.user_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+                document.getElementById('navUserAvatar').textContent = initials;
+                document.getElementById('initialGreetingMsg').innerHTML = `
+                    <strong>Good morning, ${cfg.user_name}.</strong><br>
+                    I am THIRA, your autonomous operations copilot. I am actively tracking your schedule, prioritizing client inquiries, and preparing draft responses under enterprise governance policies.<br><br>
+                    You can ask: <em>"What's on my schedule today?"</em>, request a <em>"Priority inbox summary"</em>, or select an executive workflow from the top bar.
+                `;
+            }
+            if (cfg.autonomy_level) {
+                document.getElementById('kpiAutonomy').textContent = `${cfg.autonomy_level} Autonomous Governance`;
+                document.getElementById('kpiAutonomyVal').textContent = `${cfg.autonomy_level} Guard`;
+                document.getElementById('coreStatusText').textContent = `Core Active · ${cfg.autonomy_level} Policy`;
+            }
+            if (cfg.has_google_credentials) {
+                document.getElementById('badgeGmail').textContent = 'Live Connected';
+                document.getElementById('badgeCalendar').textContent = 'Live Connected';
+            }
+        }
+
+        function openSettings() {
+            document.getElementById('cfgWorkspaceName').value = appConfig.workspace_name || '';
+            document.getElementById('cfgUserName').value = appConfig.user_name || '';
+            document.getElementById('cfgUserRole').value = appConfig.user_role || '';
+            document.getElementById('cfgAutonomyLevel').value = appConfig.autonomy_level || 'L3';
+            document.getElementById('cfgModel').value = appConfig.openai_model || 'gpt-4o';
+            document.getElementById('cfgBaseUrl').value = appConfig.openai_base_url || '';
+
+            if (appConfig.openai_base_url && appConfig.openai_base_url.includes('groq')) {
+                document.getElementById('cfgLlmProvider').value = 'groq';
+            } else if (appConfig.openai_base_url && appConfig.openai_base_url.includes('deepseek')) {
+                document.getElementById('cfgLlmProvider').value = 'deepseek';
+            } else if (appConfig.openai_base_url && appConfig.openai_base_url.includes('11434')) {
+                document.getElementById('cfgLlmProvider').value = 'ollama';
+            } else if (appConfig.openai_base_url) {
+                document.getElementById('cfgLlmProvider').value = 'custom';
+            } else {
+                document.getElementById('cfgLlmProvider').value = 'openai';
+            }
+            handleProviderChange();
+            document.getElementById('settingsModal').style.display = 'flex';
+        }
+
+        function closeSettings() {
+            document.getElementById('settingsModal').style.display = 'none';
+        }
+
+        function handleProviderChange() {
+            const val = document.getElementById('cfgLlmProvider').value;
+            const groupBaseUrl = document.getElementById('groupBaseUrl');
+            const modelInput = document.getElementById('cfgModel');
+
+            if (val === 'openai') {
+                groupBaseUrl.style.display = 'none';
+                if (!modelInput.value || modelInput.value.includes('llama') || modelInput.value.includes('deepseek')) {
+                    modelInput.value = 'gpt-4o';
+                }
+            } else if (val === 'groq') {
+                groupBaseUrl.style.display = 'flex';
+                document.getElementById('cfgBaseUrl').value = 'https://api.groq.com/openai/v1';
+                modelInput.value = 'llama-3.3-70b-versatile';
+            } else if (val === 'deepseek') {
+                groupBaseUrl.style.display = 'flex';
+                document.getElementById('cfgBaseUrl').value = 'https://api.deepseek.com/v1';
+                modelInput.value = 'deepseek-chat';
+            } else if (val === 'ollama') {
+                groupBaseUrl.style.display = 'flex';
+                document.getElementById('cfgBaseUrl').value = 'http://localhost:11434/v1';
+                modelInput.value = 'llama3.1';
+            } else {
+                groupBaseUrl.style.display = 'flex';
+            }
+        }
+
+        async function saveSettings() {
+            const updates = {
+                workspace_name: document.getElementById('cfgWorkspaceName').value,
+                user_name: document.getElementById('cfgUserName').value,
+                user_role: document.getElementById('cfgUserRole').value,
+                autonomy_level: document.getElementById('cfgAutonomyLevel').value,
+                openai_model: document.getElementById('cfgModel').value,
+                openai_base_url: document.getElementById('cfgBaseUrl').value,
+            };
+
+            const apiKey = document.getElementById('cfgApiKey').value.trim();
+            if (apiKey) updates.openai_api_key = apiKey;
+
+            const googleId = document.getElementById('cfgGoogleClientId').value.trim();
+            if (googleId) updates.google_client_id = googleId;
+
+            const googleToken = document.getElementById('cfgGoogleRefreshToken').value.trim();
+            if (googleToken) updates.google_refresh_token = googleToken;
+
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updates)
+                });
+                closeSettings();
+                await initSettings();
+                showShimmer('Updated configuration applied live.');
+                setTimeout(hideShimmer, 2000);
+            } catch (e) {
+                alert('Failed to save settings: ' + e);
+            }
+        }
 
         function connect() {
             const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
             ws = new WebSocket(`${protocol}//${location.host}/ws/chat`);
 
             ws.onopen = () => {
-                statusText.textContent = 'Core Active · L3 Policy';
                 sendBtn.disabled = false;
             };
 
@@ -1287,7 +1700,6 @@ CHAT_HTML = """<!DOCTYPE html>
                 hideShimmer();
                 renderApprovalCard(data);
             } else if (data.type === 'notification') {
-                // non-intrusive notification
                 console.log('Notification:', data.message);
             } else if (data.type === 'error') {
                 hideShimmer();
@@ -1317,7 +1729,6 @@ CHAT_HTML = """<!DOCTYPE html>
                 .replace(/\\n\\n/g, '<br><br>')
                 .replace(/\\n/g, '<br>');
 
-            // Wrap list items
             if (html.includes('<li>')) {
                 html = html.replace(/(<li>.*?<\\/li>)/g, '<ul>$1</ul>');
             }
@@ -1336,10 +1747,11 @@ CHAT_HTML = """<!DOCTYPE html>
         }
 
         function addUserMessage(text) {
+            const initials = (appConfig.user_name || 'User').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
             const row = document.createElement('div');
             row.className = 'message-row user';
             row.innerHTML = `
-                <div class="message-avatar">SG</div>
+                <div class="message-avatar">${initials}</div>
                 <div class="message-content">${text}</div>
             `;
             messagesDiv.appendChild(row);
@@ -1486,6 +1898,7 @@ CHAT_HTML = """<!DOCTYPE html>
             if (e.key === 'Enter') handleSend();
         });
 
+        initSettings();
         connect();
     </script>
 </body>

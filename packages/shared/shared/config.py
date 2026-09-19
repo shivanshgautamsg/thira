@@ -20,10 +20,21 @@ class ThiraConfig(BaseSettings):
         case_sensitive=False,
     )
 
-    # ── LLM ──────────────────────────────────────────────────
+    # ── LLM & Intelligence Engine ────────────────────────────
     openai_api_key: str = ""
+    openai_base_url: str = ""  # Allows Groq, DeepSeek, Ollama, OpenRouter, Together, vLLM
     openai_model: str = "gpt-4o"
     openai_embedding_model: str = "text-embedding-3-small"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-3-5-sonnet-20241022"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
+
+    # ── Workspace & Executive Identity ───────────────────────
+    user_name: str = "Shivansh Gautam"
+    user_role: str = "Chief Executive Officer"
+    workspace_name: str = "Acme Global Technologies"
+    autonomy_level: str = "L3"
 
     # ── Database ─────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://thira:thira_dev@localhost:5432/thira"
