@@ -1,6 +1,6 @@
 # THIRA MVP — Quickstart & Pilot Guide
 
-Welcome to **THIRA** (Agentic Intelligence & Autonomous Execution Platform with JARVIS Human Interface and ECHO Memory).
+Welcome to **THIRA** (Agentic Intelligence & Autonomous Execution Platform with ECHO Memory).
 
 THIRA continuously perceives your digital environment (email, schedule, messages), builds contextual understanding, decides what matters, plans actions, safely executes through specialized tools, verifies outcomes, and learns from experience.
 
@@ -17,7 +17,7 @@ uv sync
 # 2. Run the interactive live demo scenario
 uv run python scripts/demo.py
 
-# 3. Start the JARVIS web interface
+# 3. Start the THIRA web interface
 uv run python main.py
 ```
 
@@ -25,9 +25,9 @@ Open **[http://localhost:8000](http://localhost:8000)** in your browser.
 
 ---
 
-## 🖥️ The JARVIS Interface
+## 🖥️ The THIRA Interface
 
-The JARVIS interface is designed for high-agency human-in-the-loop interaction:
+The THIRA interface is designed for high-agency human-in-the-loop interaction:
 
 - **Live Cognitive Trace Panel**: As events arrive, watch THIRA's 8-factor decision radar (Urgency, Importance, Risk) and plan DAG execute in real time.
 - **Human Authorization Cards**: Sensitive or external-facing operations (such as sending an email or updating client calendar events) halt with an interactive card. Click **"Authorize & Execute"** or **"Decline"**.
@@ -94,7 +94,7 @@ CALENDAR_ID=primary
                     ╱         ╲
            Safe Steps         Requires Approval
                │                      │
-               │               [ JARVIS MODAL ]
+               │               [ THIRA MODAL ]
                │                      │
                ▼                      ▼
            [ ACT: Specialized Agents (Gmail, Calendar, Terminal, Filesystem) ]

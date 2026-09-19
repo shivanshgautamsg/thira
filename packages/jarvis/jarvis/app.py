@@ -43,8 +43,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="JARVIS — THIRA Human Interface",
-    description="The human-facing layer of the THIRA agentic intelligence platform.",
+    title="THIRA — Autonomous Intelligence Platform",
+    description="The human-facing interface of the THIRA agentic intelligence platform.",
     version="0.2.0",
     lifespan=lifespan,
 )
@@ -213,7 +213,7 @@ async def root():
 @app.get("/health")
 async def health():
     """Health check endpoint."""
-    return {"status": "ok", "service": "jarvis", "timestamp": datetime.now(UTC).isoformat()}
+    return {"status": "ok", "service": "thira", "timestamp": datetime.now(UTC).isoformat()}
 
 
 @app.post("/api/approve/{plan_id}")
@@ -278,7 +278,7 @@ CHAT_HTML = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JARVIS — THIRA Autonomous Platform</title>
+    <title>THIRA — Autonomous Platform</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -758,7 +758,7 @@ CHAT_HTML = """<!DOCTYPE html>
         <div class="chat-panel">
             <div class="messages-container" id="messages">
                 <div class="message assistant">
-                    <strong>Greetings. I am JARVIS.</strong><br>
+                    <strong>Greetings. I am THIRA.</strong><br>
                     I continuously perceive your digital environment, build context, decide what matters, plan actions, and execute through specialized agents.<br><br>
                     Try asking: <em>"What's on my schedule today?"</em> or trigger a <strong>Demo Scenario</strong> from the header.
                 </div>
@@ -804,7 +804,7 @@ CHAT_HTML = """<!DOCTYPE html>
 
             ws.onopen = () => {
                 statusDot.style.background = 'var(--success)';
-                statusText.textContent = 'JARVIS Ready';
+                statusText.textContent = 'THIRA Ready';
                 sendBtn.disabled = false;
             };
 

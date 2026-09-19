@@ -320,7 +320,7 @@ async def main():
 
     print(f"{Colors.BOLD}{'=' * 60}{Colors.RESET}")
     print(f"{Colors.GREEN}{Colors.BOLD}✓ Live Demonstration Completed Successfully!{Colors.RESET}")
-    print("To launch the interactive JARVIS web application:")
+    print("To launch the interactive THIRA web application:")
     print(f"  {Colors.CYAN}uv run python main.py{Colors.RESET}")
     print(f"Then open {Colors.BOLD}http://localhost:8000{Colors.RESET} in your browser.")
     print(f"{Colors.BOLD}{'=' * 60}{Colors.RESET}\n")

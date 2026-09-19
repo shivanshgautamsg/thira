@@ -2,7 +2,7 @@
 
 > **THIRA is an agentic intelligence platform that continuously perceives a user's digital environment, builds contextual understanding, decides what matters, plans actions, delegates execution to specialized agents and tools, verifies outcomes, and learns from experience.**
 >
-> **JARVIS is the interaction and autonomy experience. ARTEMIS is the device execution capability. ECHO is the experience-memory system.**
+> **THIRA combines proactive perception, autonomous agent execution, and the ECHO experience-memory system.**
 
 ---
 
@@ -34,7 +34,7 @@
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│                    JARVIS (Interface)                       │
+│                   THIRA Web Interface                       │
 │      WebUI / Chat / Proactive Feeds / Approval Modal        │
 └──────────────────────────────┬──────────────────────────────┘
                                │ WebSocket / REST
@@ -128,7 +128,7 @@ uv run pytest
 uv run alembic upgrade head
 ```
 
-### 5. Launch THIRA & JARVIS
+### 5. Launch THIRA
 ```bash
 # Configure environment
 cp .env.example .env
@@ -137,7 +137,7 @@ cp .env.example .env
 uv run python main.py
 ```
 
-Open your browser at `http://localhost:8000` to interact with the JARVIS interface.
+Open your browser at `http://localhost:8000` to interact with the THIRA interface.
 
 ---
 
